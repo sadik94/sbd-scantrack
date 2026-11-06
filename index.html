@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SBD ScanTrack</title>
+<style>
+:root{--bg:#f4f2ea;--ink:#26332d;--mu:#6b756f;--ln:#d9d6c8;--br:#2f4a3f;--ok:#4f7a5a;--wn:#b08a3a;--bd:#a5513f}
+*{box-sizing:border-box}body{margin:0;font:14px "Segoe UI",system-ui,Arial;background:var(--bg);color:var(--ink)}
+header{background:var(--br);color:#f1eedd;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+h1{margin:0;font-size:18px}.pill{padding:3px 10px;border-radius:12px;font-size:12px;background:#ecdcae;color:#26332d}.pill.ok{background:#cfe0d1}.pill.bad{background:#e6c2b9}
+nav{display:flex;flex-wrap:wrap;gap:2px;padding:6px 16px 0;background:#ebe8da;border-bottom:1px solid var(--ln)}
+nav button{border:0;background:none;padding:8px 12px;cursor:pointer;color:var(--mu);border-bottom:3px solid transparent;font:inherit}nav .on{color:var(--br);border-color:var(--br);font-weight:600}
+main{padding:16px;max-width:1150px;margin:auto}section{display:none}section.on{display:block}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}.c{background:#fff;border:1px solid var(--ln);border-radius:6px;padding:12px;margin-bottom:14px}
+.k b{display:block;font-size:22px;color:var(--br)}.k span{font-size:11px;color:var(--mu);text-transform:uppercase}
+h2{font-size:15px;margin:0 0 8px;color:var(--br)}form,.f{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--mu)}input,select,textarea{padding:7px;border:1px solid var(--ln);border-radius:4px;font:inherit;background:#fff;color:var(--ink)}
+.btn{background:var(--br);color:#fff;border:0;padding:8px 14px;border-radius:4px;cursor:pointer;font:inherit}.btn.s{background:#e3dfcc;color:var(--ink)}.btn.x{background:none;color:var(--bd);padding:2px 6px}
+.w{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:6px 8px;border-bottom:1px solid var(--ln);text-align:left;white-space:nowrap}th{background:#ebe8da;color:var(--br)}
+.m{font-size:13px;margin-top:6px}.e{color:var(--bd)}.o{color:var(--ok)}.wn{color:var(--wn)}pre{background:#f4f2ea;padding:8px;max-height:220px;overflow:auto;font-size:11px;white-space:pre-wrap;word-break:break-all}.full{grid-column:1/-1}
+</style></head><body>
+<header><div><h1>SBD ScanTrack</h1><small>Scanning Operations &amp; Equipment Management</small></div><span id="pill" class="pill">Starting…</span></header>
+<nav id="tabs"></nav>
+<main>
+<section id="v-dash"></section>
+<section id="v-log"><div class="c"><h2 id="lTitle">New scanning entry</h2><form id="lf" novalidate></form><div id="lm" class="m"></div></div><div class="c"><h2>Entries</h2><div class="w"><table id="lt"></table></div></div></section>
+<section id="v-equip"><div class="c"><h2>Equipment register</h2><form id="ef" novalidate></form><div id="em" class="m"></div></div><div class="c"><div class="w"><table id="et"></table></div></div></section>
+<section id="v-setup"></section>
+<section id="v-sync"></section>
+</main>
+<script src="https://components.connect.trimble.com/trimble-connect-workspace-api/index.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script>
+const $=i=>document.getElementById(i),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const T=['projects','areas','reasons','operators','statuses','conditions','equipment','log'],FN='sbd_scantrack_data.json',FOLDER='SBD ScanTrack Data';
+const VIEWS=[['dash','Dashboard'],['log','Scanning Log'],['equip','Equipment'],['setup','Setup & Lists'],['sync','Sync & Connection']];
+let API=null,PROJ=null,DB=null,RO=false,editL=null,editE=null,logTxt='',pushT=null,TC={token:null,key:null,folder:null,ready:false};
+const emb=window.parent!==window,now=()=>Date.now(),live=t=>DB[t].filter(r=>!r.d),LS=()=>'sbd2_'+(PROJ&&PROJ.id||'standalone');
+const dlog=(a,b)=>{logTxt=new Date().toLocaleTimeString()+' '+a+' '+(b===undefined?'':typeof b==='string'?b:JSON.stringify(b).slice(0,600))+'\n'+logTxt;if($('dl'))$('dl').textContent=logTxt};
+/* ---------- data (seeded from SBD_ScanTrack.xlsx lists) ---------- */
+function seed(){const d={rev:0};T.forEach(t=>d[t]=[]);const a=(t,id,o)=>d[t].push({id,u:0,...o});
+['C422','C423','C425','C426'].forEach(n=>a('projects','p:'+n,{name:n}));
+[['C422','Area A'],['C422','Area B'],['C423','Area B'],['C423','Area C'],['C425','Area C'],['C425','Area D'],['C426','Area E'],['C426','Area A']].forEach(([p,n])=>a('areas','a:'+p+'|'+n,{project:p,name:n}));
+['Weather','No work / no survey requirement','Site access restriction','Project / schedule delay','Equipment fault','Maintenance / calibration','Transport / relocation','Operator unavailable','Other'].forEach(n=>a('reasons','r:'+n,{name:n}));
+['GIREESH KUMAR','SHIJIL','JAWHAR','BALA KUMAR'].forEach(n=>a('operators','o:'+n,{name:n}));
+['In Use','Available / Standby','In Transit','Under Maintenance','Out of Service'].forEach(n=>a('statuses','s:'+n,{name:n}));
+['Operational','Needs Inspection','Under Maintenance','Out of Service'].forEach(n=>a('conditions','c:'+n,{name:n}));
+['SX12','GS-200'].forEach(n=>a('equipment','e:'+n,{asset:n}));return d}
+function merge(a,b){T.forEach(t=>{const m=new Map(a[t].map(r=>[r.id,r]));(b[t]||[]).forEach(r=>{const x=m.get(r.id);if(!x||r.u>x.u)m.set(r.id,r)});a[t]=[...m.values()]});return a}
+function persist(){try{localStorage.setItem(LS(),JSON.stringify(DB))}catch(e){}}
+function loadLocal(){DB=seed();try{const s=localStorage.getItem(LS());if(s)merge(DB,JSON.parse(s))}catch(e){}}
+function put(t,r){r.u=now();const i=DB[t].findIndex(x=>x.id===r.id);i<0?DB[t].push(r):DB[t][i]=r;changed()}
+function del(t,id){const r=DB[t].find(x=>x.id===id);if(r){r.d=1;r.u=now();changed()}}
+function changed(){persist();render();clearTimeout(pushT);pushT=setTimeout(()=>push().catch(syncErr),1500)}
+/* ---------- Trimble Connect storage (Core API) ---------- */
+function base(){const v=$('region')?.value||localStorage.getItem('sbd_region')||'auto';let h=v;if(v==='auto'){const l=String(PROJ&&PROJ.location||'').toLowerCase();h=l.includes('eu')?'app21':(l.includes('asia')||l.includes('ap'))?'app31':'app'}return 'https://'+h+'.connect.trimble.com/tc/api/2.0'}
+async function tc(path,o={}){const r=await fetch(base()+path,{...o,headers:{Authorization:'Bearer '+TC.token,'Content-Type':'application/json',...(o.headers||{})}});const t=await r.text();dlog(r.status,(o.method||'GET')+' '+path+' '+t.slice(0,200));if(!r.ok){const e=new Error(r.status+' '+path);e.status=r.status;throw e}return t?JSON.parse(t):null}
+const items=async id=>{const x=await tc('/folders/'+id+'/items');return Array.isArray(x)?x:(x.items||x.data||[])};
+async function tcInit(){if(!TC.token||!PROJ)return;let root=PROJ.rootId;if(!root){const p=await tc('/projects/'+PROJ.id);root=p.rootId}
+ let f=(await items(root)).find(i=>i.name===FOLDER&&String(i.type).toUpperCase()==='FOLDER');
+ if(!f){f=await tc('/folders',{method:'POST',body:JSON.stringify({name:FOLDER,parentId:root})})}TC.folder=f.id;TC.ready=true;await pull();setPill('Synced '+new Date().toLocaleTimeString(),'ok')}
+async function pull(){if(!TC.ready)return;const it=(await items(TC.folder)).find(i=>i.name===FN);if(!it)return;const k=String(it.versionId||it.modifiedOn||it.size);if(k===TC.key)return;
+ const d=await tc('/files/fs/'+it.id+'/downloadurl');const txt=await(await fetch(d.url||d.downloadUrl)).text();merge(DB,JSON.parse(txt));TC.key=k;persist();render()}
+async function push(){if(!TC.ready||RO)return;await pull();DB.rev++;const body=JSON.stringify(DB);
+ /* Upload flow (matches trimble-connect-sdk uploadFileContent): initiate {parentId,parentType,name} -> PUT to uploadURL -> commit {uploadId} */
+ const ini=await tc('/files/fs/initiate',{method:'POST',body:JSON.stringify({parentId:TC.folder,parentType:'FOLDER',name:FN})});
+ const c=(ini.contents&&ini.contents[0])||ini,url=c.url||c.uploadURL||c.uploadUrl||ini.uploadURL||ini.uploadUrl;if(!url)throw new Error('No upload URL in initiate response - see Diagnostics');
+ const r=await fetch(url,{method:'PUT',headers:c.headers||{},body});if(!r.ok)throw new Error('PUT '+r.status);
+ await tc('/files/fs/commit',{method:'POST',body:JSON.stringify({uploadId:ini.uploadId||ini.id})});TC.key=null;await pull();setPill('Synced '+new Date().toLocaleTimeString(),'ok')}
+function syncErr(e){if(e.status===403){RO=true;setPill('Read-only (no write permission)','bad')}else setPill('Sync problem - changes kept on this device','bad');dlog('ERROR',String(e.message||e))}
+function setPill(t,c){$('pill').textContent=t;$('pill').className='pill '+(c||'')}
+/* ---------- calculations (same rules as the Excel workbook) ---------- */
+function K(rows){const ds=new Set(rows.map(r=>r.date)),sc=new Set(rows.filter(r=>r.done==='Yes').map(r=>r.date)),ws=new Set(rows.filter(r=>r.scans>0).map(r=>r.date)),s=f=>rows.reduce((a,r)=>a+(+r[f]||0),0),p=s('plan'),h=s('hrs');
+ return{scans:s('scans'),days:sc.size,standby:ds.size-ws.size,hrs:h,plan:p,util:p?h/p:null,prod:h?s('scans')/h:null,m2:s('m2'),down:s('down')}}
+const today=()=>new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,10);
+const pc=v=>v==null?'n/a':(v*100).toFixed(1)+'%',nf=(v,d=1)=>v==null?'n/a':(+v).toFixed(d);
+const opt=(arr,sel,blank)=>(blank?'<option value="">'+blank+'</option>':'')+arr.map(x=>'<option'+(x===sel?' selected':'')+'>'+esc(x)+'</option>').join('');
+const names=t=>live(t).map(r=>r.name).sort();
+/* ---------- views ---------- */
+function show(v){VIEWS.forEach(([k])=>{$('v-'+k).classList.toggle('on',k===v)});document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));if(API)try{API.ui.setActiveMenuItem('sbd_'+v)}catch(e){}}
+$('tabs').innerHTML=VIEWS.map(([k,n])=>`<button data-v="${k}">${n}</button>`).join('');$('tabs').onclick=e=>e.target.dataset.v&&show(e.target.dataset.v);
+function render(){if(!DB)return;rDash();rLog();rEquip();rSetup();rSync()}
+function rDash(){const L=live('log'),k=K(L),days=e=>e?Math.ceil((new Date(e)-new Date(new Date().toDateString()))/864e5):null;
+ const cal=live('equipment').filter(e=>e.cal).map(e=>({a:e.asset,e:e.cal,d:days(e.cal)})).filter(x=>x.d<=30).sort((a,b)=>a.d-b.d);
+ const chk=[L.filter(r=>r.done==='No'&&!r.reason).length+' no-scan entries missing a reason',L.filter(r=>r.done==='Yes'&&!r.hrs).length+' scanning entries missing hours',L.filter(r=>r.done==='Yes'&&!r.plan).length+' scanning entries missing planned hours'].join(' | ');
+ const kp=[['Total scans',k.scans],['Scanning days',k.days],['Standby days (zero scans)',k.standby],['Scanning hours',nf(k.hrs)],['Utilization',pc(k.util)],['Scans / hour',nf(k.prod)],['Area covered m²',nf(k.m2,0)],['Downtime hours',nf(k.down)]];
+ const pr=live('projects').map(p=>[p.name,K(L.filter(r=>r.project===p.name))]);
+ $('v-dash').innerHTML=`<div class="c ${cal.length?'':'o'}"><h2>Calibration certificates</h2>${cal.length?cal.map(x=>`<div class="${x.d<0?'e':'wn'}">${esc(x.a)}: ${x.d<0?'EXPIRED '+(-x.d)+' day(s) ago':'expires in '+x.d+' day(s)'} (${esc(x.e)}) - arrange renewal</div>`).join(''):'No calibration due within 30 days (set expiry dates in Equipment).'}</div>
+ <div class="g">${kp.map(([l,v])=>`<div class="c k"><b>${v}</b><span>${l}</span></div>`).join('')}</div>
+ <div class="c"><h2>Project-wise performance</h2><div class="w"><table><tr><th>Project</th><th>Scans</th><th>Scan days</th><th>Standby days</th><th>Hours</th><th>Utilization</th><th>Scans/hr</th><th>Downtime h</th></tr>${pr.map(([n,x])=>`<tr><td>${esc(n)}</td><td>${x.scans}</td><td>${x.days}</td><td>${x.standby}</td><td>${nf(x.hrs)}</td><td>${pc(x.util)}</td><td>${nf(x.prod)}</td><td>${nf(x.down)}</td></tr>`).join('')}</table></div><p class="m">Data checks: ${chk}</p></div>
+ <div class="c"><h2>Recent activity</h2><div class="w"><table><tr><th>Date</th><th>Asset</th><th>Project</th><th>Area</th><th>Scans</th><th>Hours</th></tr>${[...L].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,6).map(r=>`<tr><td>${r.date}</td><td>${esc(r.asset)}</td><td>${esc(r.project)}</td><td>${esc(r.area)}</td><td>${r.scans}</td><td>${r.hrs}</td></tr>`).join('')||'<tr><td colspan=6>No entries yet.</td></tr>'}</table></div></div>`}
+const F=(id,l,t='text',x='')=>`<label>${l}<input id="${id}" type="${t}" ${x}></label>`,S=(id,l)=>`<label>${l}<select id="${id}"></select></label>`;
+$('lf').innerHTML=F('lDate','Date','date')+S('lAsset','Asset ID')+S('lProj','Project')+S('lArea','Area scanned')+S('lDone','Scanning done')+F('lScans','Scans','number','min=0')+F('lM2','Area covered m²','number','min=0')+F('lPlan','Planned hours','number','min=0 step=.1')+F('lHrs','Scanning hours','number','min=0 step=.1')+F('lDown','Downtime hours','number','min=0 step=.1')+S('lReason','Downtime / no-scan reason')+S('lCond','Equipment condition')+S('lOp','Operator')+F('lSite','Site constraints')+S('lUp','Data uploaded')+F('lRef','File reference')+`<label class="full">Remarks<textarea id="lRem" rows="2"></textarea></label><div class="full"><button class="btn">Save entry</button> <button type="button" class="btn s" id="lCancel">Clear</button></div>`;
+function areasFor(p){return live('areas').filter(a=>a.project===p).map(a=>a.name).sort()}
+function fillLogSelects(){const v=i=>$(i).value;const keep={a:v('lAsset'),p:v('lProj'),d:v('lDone'),r:v('lReason'),c:v('lCond'),o:v('lOp'),u:v('lUp')};
+ $('lAsset').innerHTML=opt(live('equipment').map(e=>e.asset).sort(),keep.a,'Select…');$('lProj').innerHTML=opt(names('projects'),keep.p,'Select project first…');
+ const ar=$('lArea').value;$('lArea').innerHTML=opt(areasFor(v('lProj')),areasFor(v('lProj')).includes(ar)?ar:'',v('lProj')?'Select area…':'Select a project first');
+ $('lDone').innerHTML=opt(['Yes','No'],keep.d||'Yes');$('lUp').innerHTML=opt(['Yes','No'],keep.u,'');$('lReason').innerHTML=opt(names('reasons'),keep.r,'(none)');$('lCond').innerHTML=opt(names('conditions'),keep.c||'Operational');$('lOp').innerHTML=opt(names('operators'),keep.o,'Select…')}
+$('lProj').onchange=()=>{const a=$('lArea').value;fillLogSelects();if(!areasFor($('lProj').value).includes(a))$('lArea').value=''};
+function validLog(r){if(!r.date||!r.asset||!r.project||!r.area)return'Date, asset, project and area are required.';if(r.date>today())return'Date cannot be in the future.';
+ if(!live('areas').some(a=>a.project===r.project&&a.name===r.area))return'Area "'+r.area+'" is not assigned to project '+r.project+'.';
+ if([r.scans,r.m2,r.plan,r.hrs,r.down].some(x=>isNaN(x)||x<0))return'Numbers cannot be negative.';if(r.hrs>24||r.plan>24||r.down>24)return'Hours cannot exceed 24 per entry.';if(r.done==='No'&&!r.reason)return'Select a reason when no scanning was done.';return''}
+$('lf').onsubmit=e=>{e.preventDefault();const g=i=>$(i).value,n=i=>g(i)===''?0:+g(i);const r={id:editL||'l:'+g('lDate')+'|'+g('lAsset')+'|'+g('lProj')+'|'+g('lArea')+'|'+(g('lRef')||now()),date:g('lDate'),asset:g('lAsset'),project:g('lProj'),area:g('lArea'),done:g('lDone'),scans:n('lScans'),m2:n('lM2'),plan:n('lPlan'),hrs:n('lHrs'),down:n('lDown'),reason:g('lReason'),cond:g('lCond'),op:g('lOp'),site:g('lSite'),up:g('lUp'),ref:g('lRef'),rem:g('lRem')};
+ const er=validLog(r);$('lm').className='m '+(er?'e':'o');if(er){$('lm').textContent=er;return}if(RO){$('lm').className='m e';$('lm').textContent='Read-only: you do not have write permission in this Trimble Connect project.';return}
+ put('log',r);editL=null;$('lTitle').textContent='New scanning entry';$('lf').reset();fillLogSelects();$('lm').textContent='Entry saved.'};
+$('lCancel').onclick=()=>{editL=null;$('lf').reset();fillLogSelects();$('lTitle').textContent='New scanning entry'};
+function rLog(){if(document.activeElement&&$('lf').contains(document.activeElement))return fillLogTable();fillLogSelects();fillLogTable()}
+function fillLogTable(){const L=[...live('log')].sort((a,b)=>b.date.localeCompare(a.date));$('lt').innerHTML='<tr><th>Date</th><th>Asset</th><th>Project</th><th>Area</th><th>Done</th><th>Scans</th><th>m²</th><th>Plan h</th><th>Scan h</th><th>Down h</th><th>Reason</th><th>Operator</th><th>Remarks</th><th></th></tr>'+(L.map(r=>`<tr><td>${r.date}</td><td>${esc(r.asset)}</td><td>${esc(r.project)}</td><td>${esc(r.area)}</td><td>${r.done}</td><td>${r.scans}</td><td>${r.m2}</td><td>${r.plan}</td><td>${r.hrs}</td><td>${r.down}</td><td>${esc(r.reason)}</td><td>${esc(r.op)}</td><td>${esc(r.rem)}</td><td><button class="btn x" data-a="le" data-i="${esc(r.id)}">Edit</button><button class="btn x" data-a="ld" data-i="${esc(r.id)}">Delete</button></td></tr>`).join('')||'<tr><td colspan=14>No entries yet. Add one above or import the Excel workbook (Sync & Connection).</td></tr>')}
+$('lt').onclick=e=>{const a=e.target.dataset.a,i=e.target.dataset.i;if(a==='ld'&&confirm('Delete this entry for all users?'))del('log',i);if(a==='le'){const r=DB.log.find(x=>x.id===i);editL=i;$('lProj').value=r.project;fillLogSelects();const m={lDate:'date',lAsset:'asset',lProj:'project',lArea:'area',lDone:'done',lScans:'scans',lM2:'m2',lPlan:'plan',lHrs:'hrs',lDown:'down',lReason:'reason',lCond:'cond',lOp:'op',lSite:'site',lUp:'up',lRef:'ref',lRem:'rem'};for(const k in m)$(k).value=r[m[k]]??'';$('lTitle').textContent='Edit entry';scrollTo(0,0)}};
+$('ef').innerHTML=F('eId','Asset ID')+S('eStatus','Status')+F('eSite','Current site')+S('eProj','Assigned project')+F('eResp','Responsible person')+F('eArr','Date arrived','date')+F('eMov','Date moved','date')+F('eNext','Next planned use')+F('eCal','Calibration expiry','date')+F('eNote','Notes')+'<div class="full"><button class="btn">Save equipment</button></div>';
+$('ef').onsubmit=e=>{e.preventDefault();const id=$('eId').value.trim();if(!id){$('em').className='m e';$('em').textContent='Asset ID is required.';return}const old=DB.equipment.find(x=>x.id==='e:'+id)||{};
+ put('equipment',{...old,id:'e:'+id,asset:id,status:$('eStatus').value,site:$('eSite').value,project:$('eProj').value,resp:$('eResp').value,arr:$('eArr').value,mov:$('eMov').value,next:$('eNext').value,cal:$('eCal').value,note:$('eNote').value,upd:today(),d:0});$('ef').reset();$('em').className='m o';$('em').textContent='Saved.'};
+function rEquip(){if(!$('ef').contains(document.activeElement)){$('eStatus').innerHTML=opt(names('statuses'),$('eStatus').value,'');$('eProj').innerHTML=opt(names('projects'),$('eProj').value,'')}
+ $('et').innerHTML='<tr><th>Asset</th><th>Status</th><th>Site</th><th>Project</th><th>Responsible</th><th>Updated</th><th>Calib. expiry</th><th>Scans</th><th>Hours</th><th>Utilization</th><th>Scan days</th><th>Standby days</th><th></th></tr>'+live('equipment').map(q=>{const k=K(live('log').filter(r=>r.asset===q.asset));return`<tr><td>${esc(q.asset)}</td><td>${esc(q.status)}</td><td>${esc(q.site)}</td><td>${esc(q.project)}</td><td>${esc(q.resp)}</td><td>${q.upd||''}</td><td>${q.cal||''}</td><td>${k.scans}</td><td>${nf(k.hrs)}</td><td>${pc(k.util)}</td><td>${k.days}</td><td>${k.standby}</td><td><button class="btn x" data-a="ee" data-i="${esc(q.id)}">Edit</button><button class="btn x" data-a="ed" data-i="${esc(q.id)}">Delete</button></td></tr>`}).join('')}
+$('et').onclick=e=>{const a=e.target.dataset.a,i=e.target.dataset.i;if(a==='ed'&&confirm('Delete this equipment record for all users?'))del('equipment',i);if(a==='ee'){const q=DB.equipment.find(x=>x.id===i);const m={eId:'asset',eStatus:'status',eSite:'site',eProj:'project',eResp:'resp',eArr:'arr',eMov:'mov',eNext:'next',eCal:'cal',eNote:'note'};for(const k in m)$(k).value=q[m[k]]||'';scrollTo(0,0)}};
+let sProj='';
+function listBox(t,l){return`<div class="c"><h2>${l}</h2>${live(t).map(r=>`<span class="pill">${esc(r.name)} <a href="#" data-a="sd" data-t="${t}" data-i="${esc(r.id)}">×</a></span> `).join('')}<div class="f" style="margin-top:8px"><input id="n_${t}" placeholder="Add new"><button class="btn" data-a="sa" data-t="${t}">Add</button></div></div>`}
+function rSetup(){if($('v-setup').contains(document.activeElement)&&document.activeElement.tagName==='INPUT')return;const P=names('projects');
+ $('v-setup').innerHTML=`<div class="c"><h2>Area scanned - by project</h2><div class="f"><label>Project (select first)<select id="sP">${opt(P,sProj,'Select project…')}</select></label></div>${sProj?`<p>${areasFor(sProj).map(a=>`<span class="pill">${esc(a)} <a href="#" data-a="xd" data-i="${esc('a:'+sProj+'|'+a)}">×</a></span> `).join('')||'No areas assigned to this project yet.'}</p><div class="f"><input id="nArea" placeholder="New area for ${esc(sProj)}"><button class="btn" data-a="xa">Add area</button></div>`:'<p class="m">Choose a project to see and manage only its areas.</p>'}</div>`+listBox('projects','Projects')+listBox('operators','Operators / surveyors')+listBox('reasons','Downtime / no-scan reasons')+listBox('statuses','Equipment status list')+listBox('conditions','Equipment condition list')}
+$('v-setup').onchange=e=>{if(e.target.id==='sP'){sProj=e.target.value;rSetup()}};
+$('v-setup').onclick=e=>{const d=e.target.dataset,a=d.a;if(!a)return;e.preventDefault();if(RO)return alert('Read-only access');
+ if(a==='xa'){const n=$('nArea').value.trim();if(n&&!areasFor(sProj).includes(n))put('areas',{id:'a:'+sProj+'|'+n,project:sProj,name:n})}
+ if(a==='xd'&&confirm('Remove this area from the project?'))del('areas',d.i);
+ if(a==='sa'){const n=$('n_'+d.t).value.trim();if(n&&!names(d.t).includes(n))put(d.t,{id:d.t[0]+':'+n,name:n})}
+ if(a==='sd'&&confirm('Remove this list item?'))del(d.t,d.i)};
+/* ---------- Excel import / export ---------- */
+const iso=d=>{if(d instanceof Date){const x=new Date(d.getTime()+432e5),p=n=>String(n).padStart(2,'0');return x.getFullYear()+'-'+p(x.getMonth()+1)+'-'+p(x.getDate())}return d?String(d).slice(0,10):''};
+const num=v=>(v===''||v==null||isNaN(+v))?0:+v,str=v=>v==null?'':String(v).trim();
+function parseWB(wb){const out={},sh=n=>wb.Sheets[n]&&XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:null,blankrows:true});
+ const st=sh('Setup & Lists')||[];const col=(c,from=5)=>{const o=[];for(let i=from;i<st.length;i++){const v=st[i][c];if(v==null||v==='')break;o.push(str(v))}return o};
+ const P=col(0),areas=[];for(let i=5;i<st.length;i++){const p=st[i][10],a=st[i][11];if(p&&a)areas.push([str(p),str(a)])}
+ out.lists={projects:P,areas,reasons:col(18),operators:col(24),statuses:col(29),conditions:col(32)};
+ const rows=(n,from)=>{const s=sh(n)||[],h=(s[3]||[]).map(str),o=[];for(let i=4;i<s.length;i++){const r=s[i];if(!r||r.every(v=>v==null||v===''))continue;const x={};h.forEach((k,j)=>{if(k)x[k]=r[j]});o.push(x)}return o};
+ out.log=rows('Daily Scanning Log').filter(r=>r['Date']);out.equip=rows('Equipment Register').filter(r=>r['Asset ID']);return out}
+function importWB(wb){const o=parseWB(wb),L=o.lists,add=(t,n,x={})=>{if(!live(t).some(r=>r.id===t[0]+':'+n))put0(t,{id:t[0]+':'+n,name:n,...x})};let bad=0,ok=0;
+ function put0(t,r){r.u=now();const i=DB[t].findIndex(x=>x.id===r.id);i<0?DB[t].push(r):DB[t][i]=r}
+ ['projects','reasons','operators','statuses','conditions'].forEach(t=>L[t].forEach(n=>{if(!DB[t].some(r=>r.id===t[0]+':'+n&&!r.d))put0(t,{id:t[0]+':'+n,name:n})}));
+ L.areas.forEach(([p,a])=>{const id='a:'+p+'|'+a;if(!DB.areas.some(r=>r.id===id&&!r.d))put0('areas',{id,project:p,name:a})});
+ o.equip.forEach(r=>{const a=str(r['Asset ID']),id='e:'+a,old=DB.equipment.find(x=>x.id===id)||{};put0('equipment',{...old,id,asset:a,status:str(r['Current Status']),site:str(r['Current Site']),project:str(r['Assigned Project']),resp:str(r['Responsible Person']),upd:iso(r['Last Updated']),arr:iso(r['Date Arrived']),mov:iso(r['Date Moved']),next:str(r['Next Planned Use']),cal:iso(r['Calibration Expiry']||r['Calibration Expiry Date']||r['Calibration Due'])||old.cal||'',note:str(r['Notes']),d:0})});
+ const seen=new Map();o.log.forEach(r=>{const x={date:iso(r['Date']),asset:str(r['Asset ID']),project:str(r['Project']),area:str(r['Area Scanned']),done:str(r['Scanning Done'])||'Yes',scans:num(r['Scans']),m2:num(r['Area Covered m2']),plan:num(r['Planned Hours']),hrs:num(r['Scanning Hours']),down:num(r['Downtime Hours']),reason:str(r['Downtime Reason']),cond:str(r['Equipment Condition']),op:str(r['Operator']),site:str(r['Site Constraints']),up:str(r['Data Uploaded']),ref:str(r['File Reference']),rem:str(r['Remarks'])};
+  if(!x.date||!x.asset||!x.project||!x.area||!DB.areas.some(a=>!a.d&&a.project===x.project&&a.name===x.area)){bad++;return}const base='l:'+x.date+'|'+x.asset+'|'+x.project+'|'+x.area+'|'+(x.ref||x.rem),n=(seen.get(base)||0)+1;seen.set(base,n);x.id=n>1?base+'#'+n:base;put0('log',x);ok++});
+ changed();return ok+' log rows imported, '+bad+' skipped (missing fields or area not assigned to project).'}
+function exportWB(){const L=live('log'),wb=XLSX.utils.book_new(),A=(n,a)=>XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(a),n);
+ A('Daily Scanning Log',[['Date','Asset ID','Project','Area Scanned','Scanning Done','Scans','Area Covered m2','Planned Hours','Scanning Hours','Downtime Hours','Downtime Reason','Equipment Condition','Operator','Site Constraints','Data Uploaded','File Reference','Remarks'],...L.map(r=>[r.date,r.asset,r.project,r.area,r.done,r.scans,r.m2,r.plan,r.hrs,r.down,r.reason,r.cond,r.op,r.site,r.up,r.ref,r.rem])]);
+ A('Equipment Register',[['Asset ID','Status','Site','Project','Responsible','Last Updated','Arrived','Moved','Next Planned Use','Calibration Expiry','Notes'],...live('equipment').map(q=>[q.asset,q.status,q.site,q.project,q.resp,q.upd,q.arr,q.mov,q.next,q.cal,q.note])]);
+ A('Project Areas',[['Project','Area'],...live('areas').map(a=>[a.project,a.name])]);XLSX.writeFile(wb,'SBD_ScanTrack_export_'+today()+'.xlsx')}
+function rSync(){if($('v-sync').contains(document.activeElement)&&document.activeElement.tagName!=='BUTTON')return;const r=localStorage.getItem('sbd_region')||'auto';
+ $('v-sync').innerHTML=`<div class="c"><h2>Central data (Trimble Connect project files)</h2><p>Mode: ${emb?'Embedded in Trimble Connect':'Standalone (open from Trimble Connect to sync)'}<br>Project: ${esc(PROJ&&PROJ.name||'-')} (${esc(PROJ&&PROJ.id||'-')})<br>Storage: folder "${FOLDER}" / ${FN} - ${TC.ready?'connected':'not connected'}${RO?' - READ-ONLY':''}</p>
+ <div class="f"><label>Trimble region<select id="region">${[['auto','Auto'],['app','North America'],['app21','Europe'],['app31','Asia']].map(([v,n])=>`<option value="${v}"${v===r?' selected':''}>${n}</option>`).join('')}</select></label></div><p><button class="btn" data-a="tok">Request access token</button> <button class="btn s" data-a="now">Sync now</button></p></div>
+ <div class="c"><h2>Excel &amp; data file</h2><div class="f"><label>Import SBD_ScanTrack.xlsx<input type="file" id="xin" accept=".xlsx"></label><label>Load data file (.json)<input type="file" id="jin" accept=".json"></label></div><p><button class="btn" data-a="xo">Export to Excel</button> <button class="btn s" data-a="jo">Download data file (.json)</button></p><div id="sm" class="m"></div></div>
+ <div class="c"><h2>Diagnostics</h2><pre id="dl">${esc(logTxt)}</pre></div>`}
+$('v-sync').onchange=e=>{const f=e.target.files&&e.target.files[0];if(e.target.id==='region'){localStorage.setItem('sbd_region',e.target.value);return}if(!f)return;const rd=new FileReader();
+ rd.onload=()=>{try{$('sm').className='m o';if(e.target.id==='xin')$('sm').textContent=importWB(XLSX.read(rd.result,{type:'array',cellDates:true}));else{merge(DB,JSON.parse(rd.result));changed();$('sm').textContent='Data file merged.'}}catch(x){$('sm').className='m e';$('sm').textContent='Could not read file: '+x.message}};e.target.id==='xin'?rd.readAsArrayBuffer(f):rd.readAsText(f)};
+$('v-sync').onclick=e=>{const a=e.target.dataset.a;if(a==='xo')exportWB();if(a==='jo'){const l=document.createElement('a');l.href=URL.createObjectURL(new Blob([JSON.stringify(DB)],{type:'application/json'}));l.download=FN;l.click()}
+ if(a==='tok')reqTok();if(a==='now')TC.ready?pull().then(()=>push()).catch(syncErr):tcInit().catch(syncErr)};
+/* ---------- Workspace API ---------- */
+function gotTok(t){if(t&&t!=='pending'&&t!=='denied'){const first=!TC.token;TC.token=t;if(first)tcInit().catch(syncErr)}else setPill(t==='denied'?'Token denied - cannot sync':'Waiting for consent…','')}
+const reqTok=()=>API&&API.extension.requestPermission('accesstoken').then(gotTok).catch(e=>dlog('token',String(e)));
+function onEvent(ev,a){const d=a&&a.data!==undefined?a.data:a;if(ev==='extension.command'){const m={sbd_main:'dash',sbd_dash:'dash',sbd_log:'log',sbd_equip:'equip',sbd_setup:'setup',sbd_sync:'sync'}[String(d).split('?')[0]];if(m)show(m)}else if(ev==='extension.accessToken')gotTok(d)}
+async function start(){loadLocal();render();show('dash');if(!emb){setPill('Standalone - not synced','');return}
+ try{API=await TrimbleConnectWorkspace.connect(window.parent,onEvent,30000);PROJ=await API.project.getCurrentProject();loadLocal();render();setPill('Connected - requesting access…','');
+  const ic=new URL('icon.svg',location.href).href;await API.ui.setMenu({title:'SBD ScanTrack',icon:ic,command:'sbd_main',subMenus:VIEWS.map(([k,n])=>({title:n,icon:ic,command:'sbd_'+k}))});
+  API.extension.setStatusMessage('SBD ScanTrack ready');reqTok();setInterval(()=>TC.ready&&pull().then(()=>setPill('Synced '+new Date().toLocaleTimeString(),'ok')).catch(syncErr),30000)}catch(e){setPill('Connection failed','bad');dlog('connect',String(e&&e.message||e))}}
+start();
+</script></body></html>
